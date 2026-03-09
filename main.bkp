@@ -26,43 +26,35 @@ func main() {
 	hostPort := os.Getenv("MQ_HOST")
 	manager := os.Getenv("MQ_MANAGER")
 	channel := os.Getenv("MQ_CHANNEL")
+	// username := os.Getenv("USERNAME")
+	// password := os.Getenv("PASSWORD")
 
-	// Get credentials from environment or use defaults
-	username := "app"                        // Default app user
-	password := os.Getenv("MQ_APP_PASSWORD") // Should be "admin" from your docker-compose
+	fmt.Println("conectando em ", hostPort, "gerenciador", manager, "canal", channel)
 
-	if channel == "" {
-		channel = "DEV.APP.SVRCONN"
-	}
-
-	fmt.Println("conectando em", hostPort, "gerenciador", manager, "canal", channel)
-
+	// Connect options
 	cd := ibmmq.NewMQCD()
 	cd.ChannelName = channel
 	cd.ConnectionName = hostPort
 
-	// Create MQCSP with username and password
-	csp := ibmmq.NewMQCSP()
-	csp.AuthenticationType = ibmmq.MQCSP_AUTH_USER_ID_AND_PWD
-	csp.UserId = username
-	csp.Password = password
+	// Create MQCSP security parameters with username and password
+	// csp := ibmmq.NewMQCSP()
+	// csp.AuthenticationType = ibmmq.MQCSP_AUTH_USER_ID_AND_PWD // Explicitly set auth type
+	// csp.UserId = username
+	// csp.Password = password
 
+	csp := ibmmq.NewMQCSP()
+	// csp.AuthenticationType = ibmmq.MQCSP_AUTH_NONE
 	co := ibmmq.NewMQCNO()
 	co.ClientConn = cd
-	co.SecurityParms = csp // Add security parameters
+	co.SecurityParms = csp
 
 	qMgr, err := ibmmq.Connx(manager, co)
 	if err != nil {
 		fmt.Println("erro de conexao:", err)
-		if mqret, ok := err.(*ibmmq.MQReturn); ok {
-			fmt.Printf("MQRC: %d\n", mqret.MQRC)
-			fmt.Printf("MQCC: %d\n", mqret.MQCC)
-		}
 		return
 	}
 	defer qMgr.Disc()
 
-	// Rest of your code remains the same...
 	od := ibmmq.NewMQOD()
 	od.ObjectName = queueName
 	openOptions := ibmmq.MQOO_OUTPUT | ibmmq.MQOO_INPUT_AS_Q_DEF
@@ -70,9 +62,6 @@ func main() {
 	queue, err := qMgr.Open(od, openOptions)
 	if err != nil {
 		fmt.Println("erro ao abrir fila:", err)
-		if mqret, ok := err.(*ibmmq.MQReturn); ok {
-			fmt.Printf("MQRC: %d\n", mqret.MQRC)
-		}
 		return
 	}
 	defer queue.Close(0)
@@ -87,39 +76,41 @@ func main() {
 	}
 }
 
-// Keep your existing publicarMensagem, consumirMensagem, and extractBody functions
 func publicarMensagem(queue *ibmmq.MQObject, queueName *string) {
 	if len(os.Args) < 4 {
 		fmt.Println("use simple-mq-cli publish [queueName] [message]")
 		return
 	}
 	msg := os.Args[3]
-	fmt.Println("publicando mensagem", msg, "na fila", *queueName)
-
+	fmt.Println("publicando mensagem ", msg, "na fila", *queueName)
 	md := ibmmq.NewMQMD()
-	md.Format = ibmmq.MQFMT_STRING
 	pmo := ibmmq.NewMQPMO()
-
 	err := queue.Put(md, pmo, []byte(msg))
 	if err != nil {
 		fmt.Println("erro na publicacao:", err)
-		if mqret, ok := err.(*ibmmq.MQReturn); ok {
-			fmt.Printf("MQRC: %d\n", mqret.MQRC)
-		}
 	} else {
 		fmt.Println("mensagem publicada!")
 	}
 }
 
+// func consumirMensagem(queue *ibmmq.MQObject, queueName *string) {
+// 	fmt.Println("consumindo mensagem da fila", *queueName)
+// 	md := ibmmq.NewMQMD()
+// 	gmo := ibmmq.NewMQGMO()
+// 	buf := make([]byte, 1024)
+// 	n, err := queue.Get(md, gmo, buf)
+// 	if err != nil {
+// 		fmt.Println("erro no consumo:", err)
+// 	} else {
+// 		fmt.Printf("recebido: %s\n", string(buf[:n]))
+// 	}
+// }
+
 func consumirMensagem(queue *ibmmq.MQObject, queueName *string) {
 	fmt.Println("consumindo mensagem da fila", *queueName)
-
 	md := ibmmq.NewMQMD()
 	gmo := ibmmq.NewMQGMO()
-	gmo.Options = ibmmq.MQGMO_NO_WAIT | ibmmq.MQGMO_CONVERT
-
-	buf := make([]byte, 64*1024)
-
+	buf := make([]byte, 64*1024) // 64KB buffer
 	n, err := queue.Get(md, gmo, buf)
 	if err != nil {
 		if mqret, ok := err.(*ibmmq.MQReturn); ok {
@@ -136,21 +127,27 @@ func consumirMensagem(queue *ibmmq.MQObject, queueName *string) {
 		}
 	} else {
 		body := extractBody(buf[:n])
+		// fmt.Printf("body: %s\n", body)
+		// fmt.Printf("recebido: %s\n", string(buf[:n]))
 		fmt.Printf("recebido: %s\n", body)
 	}
 }
 
 func extractBody(msg []byte) []byte {
+	// Step 1: Skip MQRFH2 header if present
 	if len(msg) > 8 && string(msg[:4]) == "RFH " {
 		headerLen := int(binary.BigEndian.Uint32(msg[4:8]))
 		if len(msg) >= headerLen {
 			msg = msg[headerLen:]
 		}
 	}
+	// Step 2: Skip JMS folders (look for "</jms>")
 	endTag := []byte("</jms>")
 	idx := bytes.Index(msg, endTag)
 	if idx != -1 && len(msg) > idx+len(endTag) {
+		// Skip past the end of </jms>
 		msg = msg[idx+len(endTag):]
+		// Optionally trim leading whitespace
 		msg = bytes.TrimLeft(msg, " \t\r\n")
 	}
 	return msg
