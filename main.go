@@ -26,6 +26,8 @@ func main() {
 	hostPort := os.Getenv("MQ_HOST")
 	manager := os.Getenv("MQ_MANAGER")
 	channel := os.Getenv("MQ_CHANNEL")
+	// username := os.Getenv("USERNAME")
+	// password := os.Getenv("PASSWORD")
 
 	fmt.Println("conectando em ", hostPort, "gerenciador", manager, "canal", channel)
 
@@ -33,6 +35,12 @@ func main() {
 	cd := ibmmq.NewMQCD()
 	cd.ChannelName = channel
 	cd.ConnectionName = hostPort
+
+	// Create MQCSP security parameters with username and password
+	// csp := ibmmq.NewMQCSP()
+	// csp.AuthenticationType = ibmmq.MQCSP_AUTH_USER_ID_AND_PWD // Explicitly set auth type
+	// csp.UserId = username
+	// csp.Password = password
 
 	csp := ibmmq.NewMQCSP()
 	// csp.AuthenticationType = ibmmq.MQCSP_AUTH_NONE
